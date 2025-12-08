@@ -30,17 +30,17 @@ app.post('/api/admin/init', async (req, res) => {
 
     console.log(`[INIT] User ID for global team tracking: ${userId || 'NOT PROVIDED'}`);
 
-    // IMPORTANT: Always use Web Client ID for server-side token exchange
-    // iOS Client IDs don't have client secrets, so they can't be used for server-side exchange
-    // The serverAuthCode from iOS can be exchanged with Web Client ID if they're in the same OAuth project
-    // We ignore the requestedClientId and always use Web Client ID for server-side exchange
-    const clientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || 
+    // IMPORTANT: Use the client ID sent by the mobile app
+    // This allows platform-specific client IDs (Android Client ID for Android, Web Client ID for iOS)
+    // The serverAuthCode must be exchanged using the same client ID that generated it
+    const clientId = requestedClientId ||
+                     process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ||
                      process.env.GOOGLE_WEB_CLIENT_ID ||
                      process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    
-    console.log(`[INIT] Always using Web Client ID for server-side token exchange: ${clientId ? clientId.substring(0, 20) + '...' : 'MISSING'}`);
-    console.log(`[INIT] Note: serverAuthCode from any platform can be exchanged with Web Client ID if in same OAuth project`);
+
+    console.log(`[INIT] Using client ID for server-side token exchange: ${clientId ? clientId.substring(0, 20) + '...' : 'MISSING'}`);
+    console.log(`[INIT] Client ID source: ${requestedClientId ? 'from mobile app (platform-specific)' : 'from environment variable (fallback)'}`);
     
     console.log('Environment check:', {
       hasClientId: !!clientId,
