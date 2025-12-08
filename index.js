@@ -3,6 +3,7 @@ const cors = require('cors');
 const { google } = require('googleapis');
 const { Readable } = require('stream');
 const { kv } = require('@vercel/kv');
+const { verifyAppleToken, exchangeAppleAuthCode, refreshAppleAccessToken } = require('./apple-auth-utils');
 require('dotenv').config();
 
 const app = express();
@@ -22,7 +23,69 @@ const SESSION_TTL = 7 * 24 * 60 * 60;
  */
 app.post('/api/admin/init', async (req, res) => {
   try {
-    const { folderId, serverAuthCode, clientId: requestedClientId, userId } = req.body;
+    const { accountType, userId } = req.body;
+
+    console.log(`[INIT] Account type: ${accountType || 'google (default)'}`);
+    console.log(`[INIT] User ID: ${userId || 'NOT PROVIDED'}`);
+
+    // ========== APPLE SIGN IN ==========
+    if (accountType === 'apple') {
+      const { identityToken, authorizationCode, appleUserId, folderId } = req.body;
+
+      if (!identityToken || !authorizationCode) {
+        return res.status(400).json({ error: 'Missing Apple credentials' });
+      }
+
+      console.log('[APPLE] Verifying identity token...');
+
+      // 1. Verify the identity token
+      let decodedToken;
+      try {
+        decodedToken = await verifyAppleToken(identityToken);
+        console.log('[APPLE] Token verified for user:', decodedToken.sub);
+      } catch (verifyError) {
+        console.error('[APPLE] Token verification failed:', verifyError.message);
+        return res.status(401).json({ error: 'Invalid Apple identity token' });
+      }
+
+      // 2. Exchange authorization code for tokens
+      console.log('[APPLE] Exchanging authorization code...');
+      let tokens;
+      try {
+        tokens = await exchangeAppleAuthCode(authorizationCode);
+        console.log('[APPLE] Token exchange successful');
+      } catch (exchangeError) {
+        console.error('[APPLE] Token exchange failed:', exchangeError.message);
+        return res.status(500).json({
+          error: 'Failed to exchange Apple authorization code',
+          details: exchangeError.message
+        });
+      }
+
+      // 3. Generate session ID
+      const sessionId = `apple_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // 4. Store session in Vercel KV
+      const sessionData = {
+        accountType: 'apple',
+        userId: userId || appleUserId,
+        folderId: folderId,
+        refreshToken: tokens.refreshToken,
+        email: decodedToken.email,
+        createdAt: Date.now(),
+      };
+
+      await kv.set(`session:${sessionId}`, JSON.stringify(sessionData), {
+        ex: SESSION_TTL,
+      });
+
+      console.log('[APPLE] Session created:', sessionId);
+
+      return res.json({ sessionId });
+    }
+
+    // ========== GOOGLE SIGN IN (existing code) ==========
+    const { folderId, serverAuthCode, clientId: requestedClientId } = req.body;
 
     if (!folderId || !serverAuthCode) {
       return res.status(400).json({ error: 'Missing folderId or serverAuthCode' });
