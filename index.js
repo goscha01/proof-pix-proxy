@@ -4,10 +4,20 @@ const { google } = require('googleapis');
 const { Readable } = require('stream');
 const { kv } = require('@vercel/kv');
 const { verifyAppleToken, exchangeAppleAuthCode, refreshAppleAccessToken } = require('./apple-auth-utils');
+const multer = require('multer'); // Middleware for handling multipart/form-data
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Configure multer for memory storage (files are processed in memory, not saved to disk)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB file size limit
+    fieldSize: 10 * 1024 * 1024 // 10MB field size limit
+  }
+});
 
 // Middleware
 app.use(cors());
@@ -585,23 +595,12 @@ app.post('/api/prepare/:sessionId', async (req, res) => {
 /**
  * Upload endpoint: Upload a photo (supports both admin and team member uploads)
  * POST /api/upload/:sessionId
- * Body: { 
- *   token? (optional for admin uploads), 
- *   filename, 
- *   contentBase64,
- *   albumName?,
- *   room?,
- *   type?,
- *   format?,
- *   location?,
- *   cleanerName?,
- *   flat? (boolean)
- * }
+ * Supports JSON body (legacy) and multipart/form-data (new standard)
  */
-app.post('/api/upload/:sessionId', async (req, res) => {
+app.post('/api/upload/:sessionId', upload.single('photo'), async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { 
+    let { 
       token, 
       filename, 
       contentBase64,
@@ -614,9 +613,32 @@ app.post('/api/upload/:sessionId', async (req, res) => {
       flat = false
     } = req.body;
 
+    // Handle multipart/form-data upload (raw binary)
+    // req.file contains the file buffer if uploaded via multipart
+    let fileBuffer;
+    let mimeType = 'image/jpeg';
+
+    if (req.file) {
+      console.log(`[UPLOAD] Received multipart file upload: ${req.file.originalname} (${req.file.size} bytes)`);
+      fileBuffer = req.file.buffer;
+      filename = filename || req.file.originalname; // Use uploaded filename if not provided in body
+      mimeType = req.file.mimetype || mimeType;
+      
+      // Convert string 'true'/'false' to boolean for flat
+      if (typeof flat === 'string') {
+        flat = flat === 'true';
+      }
+    } else if (contentBase64) {
+      // Legacy Base64 handling
+      console.log(`[UPLOAD] Received Base64 upload: ${filename} (${contentBase64.length} chars)`);
+      fileBuffer = Buffer.from(contentBase64, 'base64');
+    } else {
+      return res.status(400).json({ error: 'Missing file content (req.file or contentBase64)' });
+    }
+
     // Validate required inputs
-    if (!filename || !contentBase64) {
-      return res.status(400).json({ error: 'Missing required fields: filename and contentBase64' });
+    if (!filename) {
+      return res.status(400).json({ error: 'Missing filename' });
     }
 
     // Get admin session from Vercel KV
@@ -816,9 +838,8 @@ app.post('/api/upload/:sessionId', async (req, res) => {
     
     console.log(`[FOLDER STRUCTURE] Final upload target: ${targetFolderId}`);
 
-    // Convert base64 to buffer and then to a readable stream
-    const buffer = Buffer.from(contentBase64, 'base64');
-    const stream = Readable.from(buffer);
+    // Create readable stream from buffer (works for both multipart and base64 sources)
+    const stream = Readable.from(fileBuffer);
 
     // Upload to Google Drive
     let response;
@@ -829,7 +850,7 @@ app.post('/api/upload/:sessionId', async (req, res) => {
           parents: [targetFolderId]
         },
         media: {
-          mimeType: 'image/jpeg',
+          mimeType: mimeType,
           body: stream
         }
       });
@@ -856,8 +877,8 @@ app.post('/api/upload/:sessionId', async (req, res) => {
               parents: [targetFolderId]
             },
             media: {
-              mimeType: 'image/jpeg',
-              body: Readable.from(buffer) // Create new stream for retry
+              mimeType: mimeType,
+              body: Readable.from(fileBuffer) // Create new stream for retry
             }
           });
         } catch (refreshError) {
