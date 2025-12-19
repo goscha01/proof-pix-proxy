@@ -1540,30 +1540,109 @@ app.get('/join', (req, res) => {
       color: #999;
       margin-top: 8px;
     }
+    .copy-btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background: #28a745;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    .copy-btn:active { background: #218838; }
+    .copied-msg {
+      color: #28a745;
+      font-size: 14px;
+      font-weight: 600;
+      margin-top: 8px;
+      display: none;
+    }
+    .step {
+      background: #f9f9f9;
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 15px;
+      text-align: left;
+    }
+    .step-number {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      background: #F2C31B;
+      color: #333;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 24px;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    .step-text {
+      font-size: 14px;
+      color: #333;
+    }
   </style>
+  <script>
+    function copyInviteCode() {
+      const code = '${displayInvite}';
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(code).then(function() {
+          document.getElementById('copied-msg').style.display = 'block';
+          setTimeout(function() {
+            document.getElementById('copied-msg').style.display = 'none';
+          }, 3000);
+        });
+      } else {
+        // Fallback for older browsers
+        var textArea = document.createElement('textarea');
+        textArea.value = code;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        document.getElementById('copied-msg').style.display = 'block';
+        setTimeout(function() {
+          document.getElementById('copied-msg').style.display = 'none';
+        }, 3000);
+      }
+    }
+  </script>
 </head>
 <body>
   <div class="container">
     <div class="logo">PP</div>
 
     <div id="fallback">
-      <h1>Get ProofPix</h1>
-      <p>Download the app to join your team and start taking before & after photos!</p>
+      <h1>Join Your Team!</h1>
+      <p>You've been invited to join a ProofPix team.</p>
 
-      <div class="store-buttons">
-        ${isIOS ? `<a href="${iosStore}" class="store-btn ios">Download for iPhone</a>` : ''}
-        ${isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
-        ${!isIOS && !isAndroid ? `<a href="${iosStore}" class="store-btn ios">Download for iPhone</a>` : ''}
-        ${!isIOS && !isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
+      <div class="step">
+        <span class="step-number">1</span>
+        <span class="step-text">Copy your invite code:</span>
+        <div class="code" style="margin-top: 10px;">${displayInvite}</div>
+        <button class="copy-btn" onclick="copyInviteCode()">📋 Copy Invite Code</button>
+        <div id="copied-msg" class="copied-msg">✓ Copied to clipboard!</div>
       </div>
 
-      <div class="code-section">
-        <div class="code-label">After installing, use this invite code:</div>
-        <div class="code">${displayInvite}</div>
-        <div class="hint">Tap to select, then copy and paste in the app</div>
+      <div class="step">
+        <span class="step-number">2</span>
+        <span class="step-text">Download ProofPix:</span>
+        <div class="store-buttons" style="margin-top: 10px;">
+          ${isIOS ? `<a href="${iosStore}" class="store-btn ios">Download for iPhone</a>` : ''}
+          ${isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
+          ${!isIOS && !isAndroid ? `<a href="${iosStoreWeb}" class="store-btn ios">Download for iPhone</a>` : ''}
+          ${!isIOS && !isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
+        </div>
       </div>
 
-      <div style="margin-top: 20px;">
+      <div class="step">
+        <span class="step-number">3</span>
+        <span class="step-text">Open the app, tap "Join Team", and paste your invite code</span>
+      </div>
+
+      <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee;">
         <a href="${deepLink}" class="store-btn" style="background: #F2C31B; color: #333;">Already have the app? Open it</a>
       </div>
     </div>
