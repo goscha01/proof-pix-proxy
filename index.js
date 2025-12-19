@@ -1413,7 +1413,7 @@ app.get('/join', (req, res) => {
   const deepLink = `proofpix://join?invite=${encodeURIComponent(invite || '')}`;
 
   // App store URLs from environment or defaults
-  const iosStore = process.env.IOS_APP_STORE_URL || 'https://apps.apple.com/app/proofpix';
+  const iosStore = process.env.IOS_APP_STORE_URL || 'https://apps.apple.com/app/id6754261444';
   const androidStore = process.env.ANDROID_PLAY_STORE_URL || 'https://play.google.com/store/apps/details?id=com.proofpix.app';
 
   // Decode invite for display (safely)
