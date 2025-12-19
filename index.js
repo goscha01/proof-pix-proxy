@@ -1541,28 +1541,12 @@ app.get('/join', (req, res) => {
       margin-top: 8px;
     }
   </style>
-  <script>
-    // Try to open the app immediately
-    window.location.href = '${deepLink}';
-
-    // After delay, show store buttons (app didn't open)
-    setTimeout(function() {
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('fallback').style.display = 'block';
-    }, 2500);
-  </script>
 </head>
 <body>
   <div class="container">
     <div class="logo">PP</div>
 
-    <div id="loading">
-      <h1>Opening ProofPix...</h1>
-      <div class="spinner"></div>
-      <p>Please wait while we open the app</p>
-    </div>
-
-    <div id="fallback" style="display: none;">
+    <div id="fallback">
       <h1>Get ProofPix</h1>
       <p>Download the app to join your team and start taking before & after photos!</p>
 
@@ -1577,6 +1561,10 @@ app.get('/join', (req, res) => {
         <div class="code-label">After installing, use this invite code:</div>
         <div class="code">${displayInvite}</div>
         <div class="hint">Tap to select, then copy and paste in the app</div>
+      </div>
+
+      <div style="margin-top: 20px;">
+        <a href="${deepLink}" class="store-btn" style="background: #F2C31B; color: #333;">Already have the app? Open it</a>
       </div>
     </div>
   </div>
