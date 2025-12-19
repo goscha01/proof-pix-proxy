@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const { google } = require('googleapis');
 const { Readable } = require('stream');
 const { kv } = require('@vercel/kv');
@@ -9,6 +10,9 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Serve static files (logo)
+app.use('/assets', express.static(path.join(__dirname, '.')));
 
 // Configure multer for memory storage (files are processed in memory, not saved to disk)
 const upload = multer({
@@ -1458,17 +1462,20 @@ app.get('/join', (req, res) => {
       box-shadow: 0 10px 40px rgba(0,0,0,0.15);
     }
     .logo {
-      width: 80px;
-      height: 80px;
-      background: #F2C31B;
-      border-radius: 20px;
-      margin: 0 auto 20px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 36px;
+      width: 100px;
+      height: 100px;
+      margin: 0 auto 10px;
+    }
+    .logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .app-name {
+      font-size: 28px;
       font-weight: bold;
       color: #333;
+      margin-bottom: 20px;
     }
     h1 {
       color: #333;
@@ -1612,7 +1619,10 @@ app.get('/join', (req, res) => {
 </head>
 <body>
   <div class="container">
-    <div class="logo">PP</div>
+    <div class="logo">
+      <img src="/assets/PP_logo.png" alt="ProofPix Logo" />
+    </div>
+    <div class="app-name">ProofPix</div>
 
     <div id="fallback">
       <h1>Join Your Team!</h1>

@@ -58,12 +58,31 @@ async function verifyAppleToken(identityToken) {
  * @returns {string} Client secret JWT
  */
 function generateAppleClientSecret() {
-  const privateKey = process.env.APPLE_PRIVATE_KEY;
+  let privateKey = process.env.APPLE_PRIVATE_KEY;
   const teamId = process.env.APPLE_TEAM_ID;
   const keyId = process.env.APPLE_KEY_ID;
 
   if (!privateKey || !teamId || !keyId) {
     throw new Error('Missing Apple credentials in environment variables. Required: APPLE_PRIVATE_KEY, APPLE_TEAM_ID, APPLE_KEY_ID');
+  }
+
+  // Handle private key formatting
+  // If the key is on a single line (from Vercel), format it properly
+  if (!privateKey.includes('\n')) {
+    console.log('[APPLE] Private key is on single line, reformatting...');
+    // Split the key into proper PEM format
+    privateKey = privateKey
+      .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+      .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+    
+    // Insert newlines every 64 characters in the key body
+    const beginMarker = '-----BEGIN PRIVATE KEY-----\n';
+    const endMarker = '\n-----END PRIVATE KEY-----';
+    const keyBody = privateKey.replace(beginMarker, '').replace(endMarker, '');
+    const formattedBody = keyBody.match(/.{1,64}/g)?.join('\n') || keyBody;
+    privateKey = beginMarker + formattedBody + endMarker;
+    
+    console.log('[APPLE] Private key reformatted successfully');
   }
 
   const headers = {
