@@ -1567,10 +1567,8 @@ app.get('/join', (req, res) => {
       <div class="store-buttons">
         ${isIOS ? `<a href="${iosStore}" class="store-btn ios">Download for iPhone</a>` : ''}
         ${isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
-        ${!isIOS && !isAndroid ? `
-          <a href="${iosStore}" class="store-btn ios">Download for iPhone</a>
-          <a href="${androidStore}" class="store-btn android">Download for Android</a>
-        ` : ''}
+        ${!isIOS && !isAndroid ? `<a href="${iosStore}" class="store-btn ios">Download for iPhone</a>` : ''}
+        ${!isIOS && !isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
       </div>
 
       <div class="code-section">
