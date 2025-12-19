@@ -516,6 +516,17 @@ app.post('/api/prepare/:sessionId', async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
+    // Skip folder preparation for Apple/iCloud uploads (simulated for now)
+    if (session.accountType === 'apple') {
+      console.log('[APPLE] Album folder preparation skipped (iCloud simulated)');
+      return res.json({ 
+        success: true, 
+        message: 'iCloud folder ready (simulated)',
+        albumName: albumName,
+        folderId: session.folderId 
+      });
+    }
+
     if (!session.refreshToken) {
       return res.status(400).json({ error: 'Admin session is missing the required refresh token. Please have the admin re-authenticate.' });
     }
@@ -654,7 +665,59 @@ app.post('/api/upload/:sessionId', upload.single('photo'), async (req, res) => {
     }
     
     console.log(`[UPLOAD] Session found for ${sessionId}, refresh token length: ${session.refreshToken?.length || 0}`);
+    console.log(`[UPLOAD] Session account type: ${session.accountType || 'google'}`);
     
+    // ========== APPLE / iCLOUD UPLOAD HANDLING ==========
+    if (session.accountType === 'apple') {
+      console.log('[APPLE] Upload request for Apple/iCloud session');
+      
+      // Validate Apple refresh token by attempting to get new access token
+      try {
+        const { refreshAppleAccessToken } = require('./apple-auth-utils');
+        const accessToken = await refreshAppleAccessToken(session.refreshToken);
+        console.log('[APPLE] Access token refreshed successfully');
+      } catch (refreshError) {
+        console.error('[APPLE] Failed to refresh access token:', refreshError.message);
+        return res.status(401).json({ 
+          success: false,
+          error: 'Apple session expired. Please reconnect your Apple account in Settings.' 
+        });
+      }
+      
+      // TODO: Implement actual CloudKit/iCloud Drive upload
+      // For now, we'll simulate a successful upload
+      // In the future, this would use CloudKit JS or CloudKit REST API
+      console.log('[APPLE] iCloud upload simulated successfully:', {
+        filename,
+        albumName,
+        room,
+        type,
+        format,
+        flat
+      });
+      
+      // Return success response that matches Google Drive upload format
+      const folderPath = flat 
+        ? albumName 
+        : `${albumName}/${type === 'mix' || type === 'combined' ? 'combined' : type}${format !== 'default' ? `/formats/${format}/` : '/'}`;
+      
+      return res.json({
+        success: true,
+        fileId: `icloud_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        fileName: filename,
+        albumName: albumName || null,
+        room: room || 'general',
+        type: type || null,
+        format: format || 'default',
+        location: location || null,
+        cleanerName: cleanerName || null,
+        folderPath: folderPath,
+        flatMode: !!flat,
+        message: 'Photo uploaded successfully to iCloud (simulated - CloudKit integration pending)'
+      });
+    }
+    
+    // ========== GOOGLE DRIVE UPLOAD (existing code) ==========
     // If token is provided, validate it (for team member uploads)
     // If token is not provided, assume it's an admin upload
     if (token) {
@@ -788,21 +851,54 @@ app.post('/api/upload/:sessionId', upload.single('photo'), async (req, res) => {
       // Use a separate KV key for album folder mapping to ensure atomicity across parallel uploads
       // This ensures all uploads in the same batch use the same album folder, even when running in parallel
       const albumCacheKey = `album:${sessionId}:${albumName}`;
+      const albumLockKey = `lock:album:${sessionId}:${albumName}`;
       let albumFolderId = await kv.get(albumCacheKey);
-      
+
       if (!albumFolderId) {
-        // Create or find album folder (findOrCreateFolder handles duplicates by using the most recent)
-        albumFolderId = await findOrCreateFolder(drive, session.folderId, albumName);
-        console.log(`[FOLDER STRUCTURE] Album folder: ${albumName} (${albumFolderId})`);
-        
-        // Cache it in KV with a shorter TTL (1 hour) - just for this upload session
-        // This ensures all parallel uploads in the same batch use the same album folder
-        try {
-          await kv.set(albumCacheKey, albumFolderId, { ex: 3600 }); // 1 hour TTL
-          console.log(`[FOLDER STRUCTURE] Cached album folder ID for ${albumName}: ${albumFolderId}`);
-        } catch (cacheError) {
-          console.warn(`[FOLDER STRUCTURE] Failed to cache album folder (non-critical):`, cacheError.message);
-          // Continue anyway - the folder was found/created successfully
+        // Try to acquire a lock to prevent race conditions when creating folders
+        // Use SET NX (only set if not exists) with a short TTL
+        const lockAcquired = await kv.set(albumLockKey, 'locked', { ex: 30, nx: true });
+
+        if (lockAcquired) {
+          // We got the lock, create the folder
+          try {
+            // Double-check cache in case another request just finished
+            albumFolderId = await kv.get(albumCacheKey);
+            if (!albumFolderId) {
+              // Create or find album folder (findOrCreateFolder handles duplicates by using the most recent)
+              albumFolderId = await findOrCreateFolder(drive, session.folderId, albumName);
+              console.log(`[FOLDER STRUCTURE] Album folder: ${albumName} (${albumFolderId})`);
+
+              // Cache it in KV with a shorter TTL (1 hour) - just for this upload session
+              await kv.set(albumCacheKey, albumFolderId, { ex: 3600 }); // 1 hour TTL
+              console.log(`[FOLDER STRUCTURE] Cached album folder ID for ${albumName}: ${albumFolderId}`);
+            } else {
+              console.log(`[FOLDER STRUCTURE] Another request created the folder: ${albumName} (${albumFolderId})`);
+            }
+          } finally {
+            // Release the lock
+            await kv.del(albumLockKey);
+          }
+        } else {
+          // Another request has the lock, wait for it to finish
+          console.log(`[FOLDER STRUCTURE] Waiting for another request to create album folder: ${albumName}`);
+          // Poll for the cached folder ID (up to 10 seconds)
+          for (let i = 0; i < 20; i++) {
+            await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
+            albumFolderId = await kv.get(albumCacheKey);
+            if (albumFolderId) {
+              console.log(`[FOLDER STRUCTURE] Got cached album folder after waiting: ${albumName} (${albumFolderId})`);
+              break;
+            }
+          }
+
+          // If still no folder ID, create it ourselves (lock may have expired)
+          if (!albumFolderId) {
+            console.log(`[FOLDER STRUCTURE] Lock expired, creating folder ourselves: ${albumName}`);
+            albumFolderId = await findOrCreateFolder(drive, session.folderId, albumName);
+            await kv.set(albumCacheKey, albumFolderId, { ex: 3600 });
+            console.log(`[FOLDER STRUCTURE] Created album folder after lock timeout: ${albumName} (${albumFolderId})`);
+          }
         }
       } else {
         console.log(`[FOLDER STRUCTURE] Using cached album folder: ${albumName} (${albumFolderId})`);
@@ -1292,6 +1388,201 @@ app.get('/api/admin/:sessionId/validate', async (req, res) => {
       error: error.message
     });
   }
+});
+
+// ============================================================================
+// SMART INVITE LINK ENDPOINT
+// ============================================================================
+
+/**
+ * Smart invite link landing page
+ * This endpoint handles invite links shared by admins.
+ * It tries to open the app directly, or redirects to the app store if not installed.
+ *
+ * GET /join?invite=TOKEN|SESSIONID
+ */
+app.get('/join', (req, res) => {
+  const { invite } = req.query;
+  const userAgent = req.headers['user-agent'] || '';
+
+  // Detect platform from user agent
+  const isIOS = /iPhone|iPad|iPod/i.test(userAgent);
+  const isAndroid = /Android/i.test(userAgent);
+
+  // Deep link URL - encode the invite parameter
+  const deepLink = `proofpix://join?invite=${encodeURIComponent(invite || '')}`;
+
+  // App store URLs from environment or defaults
+  const iosStore = process.env.IOS_APP_STORE_URL || 'https://apps.apple.com/app/proofpix';
+  const androidStore = process.env.ANDROID_PLAY_STORE_URL || 'https://play.google.com/store/apps/details?id=com.proofpix.app';
+
+  // Decode invite for display (safely)
+  let displayInvite = 'Invalid invite';
+  try {
+    displayInvite = invite ? decodeURIComponent(invite) : 'Invalid invite';
+  } catch (e) {
+    displayInvite = invite || 'Invalid invite';
+  }
+
+  console.log(`[JOIN] Invite link accessed - Platform: ${isIOS ? 'iOS' : isAndroid ? 'Android' : 'Desktop/Other'}`);
+
+  // HTML page that tries deep link first, falls back to store
+  res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Join ProofPix Team</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="apple-itunes-app" content="app-id=YOUR_APP_ID">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(135deg, #F2C31B 0%, #E5B517 100%);
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      max-width: 400px;
+      width: 100%;
+      background: white;
+      border-radius: 20px;
+      padding: 40px 30px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      background: #F2C31B;
+      border-radius: 20px;
+      margin: 0 auto 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      font-weight: bold;
+      color: #333;
+    }
+    h1 {
+      color: #333;
+      margin: 0 0 10px 0;
+      font-size: 24px;
+    }
+    p {
+      color: #666;
+      margin: 0 0 20px 0;
+      line-height: 1.5;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #F2C31B;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 20px auto;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .store-buttons {
+      margin-top: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .store-btn {
+      display: block;
+      padding: 14px 24px;
+      background: #333;
+      color: white;
+      text-decoration: none;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 16px;
+      transition: background 0.2s;
+    }
+    .store-btn:hover { background: #555; }
+    .store-btn.ios { background: #007AFF; }
+    .store-btn.ios:hover { background: #0056b3; }
+    .store-btn.android { background: #34A853; }
+    .store-btn.android:hover { background: #2d8e47; }
+    .code-section {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #eee;
+    }
+    .code-label {
+      font-size: 13px;
+      color: #999;
+      margin-bottom: 8px;
+    }
+    .code {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 8px;
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      word-break: break-all;
+      font-size: 12px;
+      color: #333;
+      user-select: all;
+    }
+    .hint {
+      font-size: 12px;
+      color: #999;
+      margin-top: 8px;
+    }
+  </style>
+  <script>
+    // Try to open the app immediately
+    window.location.href = '${deepLink}';
+
+    // After delay, show store buttons (app didn't open)
+    setTimeout(function() {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('fallback').style.display = 'block';
+    }, 2500);
+  </script>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">PP</div>
+
+    <div id="loading">
+      <h1>Opening ProofPix...</h1>
+      <div class="spinner"></div>
+      <p>Please wait while we open the app</p>
+    </div>
+
+    <div id="fallback" style="display: none;">
+      <h1>Get ProofPix</h1>
+      <p>Download the app to join your team and start taking before & after photos!</p>
+
+      <div class="store-buttons">
+        ${isIOS ? `<a href="${iosStore}" class="store-btn ios">Download for iPhone</a>` : ''}
+        ${isAndroid ? `<a href="${androidStore}" class="store-btn android">Download for Android</a>` : ''}
+        ${!isIOS && !isAndroid ? `
+          <a href="${iosStore}" class="store-btn ios">Download for iPhone</a>
+          <a href="${androidStore}" class="store-btn android">Download for Android</a>
+        ` : ''}
+      </div>
+
+      <div class="code-section">
+        <div class="code-label">After installing, use this invite code:</div>
+        <div class="code">${displayInvite}</div>
+        <div class="hint">Tap to select, then copy and paste in the app</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+  `);
 });
 
 /**
